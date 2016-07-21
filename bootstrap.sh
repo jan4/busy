@@ -1,12 +1,12 @@
 #!/bin/bash
 
 mkdir -p packages
-git clone https://github.com/SGSSGene/Serializer.git     extRepositories/Serializer
-git clone https://github.com/SGSSGene/Process.git        extRepositories/Process
-git clone https://github.com/SGSSGene/jsoncpp.git        extRepositories/jsoncpp
-git clone https://github.com/SGSSGene/CommonOptions.git  extRepositories/CommonOptions
-git clone https://github.com/SGSSGene/ThreadPool.git     extRepositories/ThreadPool
-git clone https://github.com/SGSSGene/yaml-cpp.git       extRepositories/yaml-cpp
+git clone https://github.com/jan4/Serializer.git     extRepositories/Serializer
+git clone https://github.com/jan4/Process.git        extRepositories/Process
+git clone https://github.com/jan4/jsoncpp.git        extRepositories/jsoncpp
+git clone https://github.com/jan4/CommonOptions.git  extRepositories/CommonOptions
+git clone https://github.com/jan4/ThreadPool.git     extRepositories/ThreadPool
+git clone https://github.com/jan4/yaml-cpp.git       extRepositories/yaml-cpp
 
 set -e
 
