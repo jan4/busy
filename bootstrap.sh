@@ -1,11 +1,17 @@
 #!/bin/bash
 
 mkdir -p packages
+rm -rf extRepositories/Serializer
 git clone https://github.com/jan4/Serializer.git     extRepositories/Serializer
+rm -rf extRepositories/Process
 git clone https://github.com/jan4/Process.git        extRepositories/Process
+rm -rf extRepositories/jsoncpp
 git clone https://github.com/jan4/jsoncpp.git        extRepositories/jsoncpp
+rm -rf extRepositories/CommonOptions
 git clone https://github.com/jan4/CommonOptions.git  extRepositories/CommonOptions
+rm -rf extRepositories/ThreadPool
 git clone https://github.com/jan4/ThreadPool.git     extRepositories/ThreadPool
+rm -rf extRepositories/yaml-cpp
 git clone https://github.com/jan4/yaml-cpp.git       extRepositories/yaml-cpp
 
 set -e
