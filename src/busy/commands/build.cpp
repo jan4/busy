@@ -241,6 +241,7 @@ bool build(std::string const& rootProjectName, bool verbose, bool noconsole, int
 		std::vector<std::string> options = toolchain->cppCompiler.command;
 		options.push_back("-std=c++11");
 		//!TODO shouldnt be default argument
+		options.push_back("-fdiagnostics-color=always");
 		options.push_back("-Wall");
 		options.push_back("-Wextra");
 		options.push_back("-fmessage-length=0");
@@ -354,6 +355,7 @@ bool build(std::string const& rootProjectName, bool verbose, bool noconsole, int
 		std::vector<std::string> options = toolchain->cCompiler.command;
 		options.push_back("-std=c11");
 		//!TODO shouldnt be default argument
+		options.push_back("-fdiagnostics-color=always");
 		options.push_back("-Wall");
 		options.push_back("-Wextra");
 		options.push_back("-fmessage-length=0");
