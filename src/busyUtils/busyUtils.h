@@ -1,5 +1,4 @@
-#ifndef EASYBUILD_UTILS_H
-#define EASYBUILD_UTILS_H
+#pragma once
 
 #include <functional>
 #include <map>
@@ -27,8 +26,8 @@ namespace utils {
 	bool isEndingWith(std::string const& str, std::string const& end);
 	bool isStartingWith(std::string const& str, std::string const& start);
 
-	std::vector<std::string> explode(std::string const& _str, std::string const& _del);
-	std::vector<std::string> explode(std::string const& _str, std::vector<std::string> const& _del);
+	auto explode(std::string const& _str, std::string const& _del) -> std::vector<std::string>;
+	auto explode(std::string const& _str, std::vector<std::string> const& _del) -> std::vector<std::string>;
 
 	std::string runProcess(std::string const& _call);
 
@@ -47,9 +46,16 @@ namespace utils {
 		}
 	};
 
-	std::string sanitize(std::string const& _s);
+	void convertDFileToDDFile(std::string const& _inFile, std::string const& _outFile);
+
+	auto sanitize(std::string const& _s) -> std::string;
+	auto sanitizeForMakro(std::string str) -> std::string;
 
 	void sleep(unsigned int _s);
+
+	bool validPackageName(std::string const& _str);
+
+	auto getDate() -> std::string;
 
 
 	class AtomicWrite {
@@ -62,4 +68,3 @@ namespace utils {
 	};
 
 }
-#endif

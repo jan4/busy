@@ -1,4 +1,4 @@
-name: aBuild
+name: busy
 extRepositories:
   - url: https://github.com/jan4/Serializer.git
   - url: https://github.com/jan4/CommonOptions.git
@@ -7,3 +7,9 @@ projects:
   - name: busy
     type: executable
 
+flavors:
+  default:
+    buildMode: debug
+    toolchain: system-gcc
+    linkAsShared:
+      - CommonOptions/commonOptions

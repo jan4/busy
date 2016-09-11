@@ -1,352 +1,365 @@
 #include "Project.h"
-
+#include "Package.h"
 #include "Workspace.h"
 
-#include "FileStates.h"
 #include <algorithm>
-#include <iostream>
+#include <busyUtils/busyUtils.h>
+#include <cstring>
 #include <fstream>
-namespace aBuild {
+#include <iostream>
 
-void Project::quickFix() {
-//!TODO sometimes wrong dependencies get detected, this is bad
-/*	for (auto const& d : getDefaultDependencies()) {
-		if (std::find(dependencies.begin(), dependencies.end(), d) == dependencies.end()) {
-			dependencies.push_back(d);
+namespace {
+	void skipAllWhiteSpaces(char const*& str) {
+		while (*str != '\0' and (*str == '\t' or *str == ' ')) ++str;
+	}
+	bool checkIfMakroEndif(char const* str) {
+		skipAllWhiteSpaces(str);
+		return strncmp(str, "#endif", 6) == 0;
+	}
+	bool checkIfMakroIfAndBusy(char const* str) {
+		skipAllWhiteSpaces(str);
+		if (strncmp(str, "#if", 3) != 0) {
+			return false;
 		}
-	}*/
-	std::sort(dependencies.begin(), dependencies.end());
+		str += 3;
+		skipAllWhiteSpaces(str);
+		return strncmp(str, "BUSY_", 5) == 0;
+	}
+	bool checkIfMakroSystemInclude(char const* str) {
+		skipAllWhiteSpaces(str);
+		if (strncmp(str, "#include", 8) != 0) {
+			return false;
+		}
+		str += 8;
+		skipAllWhiteSpaces(str);
+		return *str == '<';
+	}
 }
 
 
-/** tries to determine type by name
- *  name starting with "test" are executables
- *  everything else is a library
- */
-auto Project::getDefaultTypeByName() const -> std::string {
-	if (utils::isStartingWith(path, "test")) {
-		return "executable";
-	}
-	return "library";
-}
-
-auto Project::getDefaultDependencies(Workspace* _workspace, std::map<std::string, Project> const& _projects) const -> Dependencies {
-	auto& fileStates = _workspace->accessConfigFile().accessAutoFileStates();
-	Dependencies dep;
-	auto allFiles = getAllFiles({".cpp", ".c", ".h", ".hpp"});
-	std::set<std::string> filesOfInterest;
-	for (auto const& f : allFiles) {
-		auto currentTime = getFileStates().getFileModTime(f);
-		auto lastTime    = fileStates[f].lastChange;
-		if (lastTime == currentTime and not fileStates[f].hasChanged) {
-			for (auto const& file : fileStates[f].dependencies) {
-				filesOfInterest.insert(file);
-			}
-			continue;
-		}
-		fileStates[f].lastChange = currentTime;
-		fileStates[f].hasChanged = true;
-
-		std::ifstream ifs(f);
-		std::string line;
-
-		bool optionalSection = false;
-
-		while (std::getline(ifs, line)) {
-			auto parts = utils::explode(line, std::vector<std::string>{" ", "\t"});
-			if (parts.size() == 1 && parts[0] == "#endif") {
-				optionalSection = false;
-			} else if (parts.size() == 2 && parts[0] == "#ifdef" && parts[1].substr(0, 7) == "BUSY_") {
-				optionalSection = true;
-			} else if (not optionalSection
-			    && parts.size() == 2 && parts[0] == "#include"
-			    && parts[1].front() == '<' && parts[1].back() == '>') {
-
-				auto pos1 = parts[1].find("<")+1;
-				auto pos2 = parts[1].find(">")-pos1;
-
-				auto file = parts[1].substr(pos1, pos2);
-				filesOfInterest.insert(file);
-				fileStates[f].dependencies.push_back(file);
-			}
-
-		}
-	}
-
-	for (auto const& file : filesOfInterest) {
-		for (auto const& e : _projects) {
-			auto& project = e.second;
-			if (&project == this) continue;
-
-			for (auto const& h : project.getAllHFilesFlat()) {
-				if (file == h) {
-					auto package = project.getPackagePath();
-					auto pList   = utils::explode(package, "/");
-					auto d       = pList.back() + "/" + project.getName();
-
-					if (std::find(dep.begin(), dep.end(), d) == dep.end()) {
-						dep.emplace_back(d);
-					}
-					break;
-				}
-			}
-		}
-	}
-
-	return dep;
-}
-
-auto Project::getDefaultOptionalDependencies(Workspace* _workspace, std::map<std::string, Project> const& _projects) const -> Dependencies {
-	auto& fileStates = _workspace->accessConfigFile().accessAutoFileStates();
-	Dependencies dep;
-	auto allFiles = getAllFiles({".cpp", ".c", ".h", ".hpp"});
-	std::set<std::string> filesOfInterest;
-	for (auto const& f : allFiles) {
-		auto currentTime = getFileStates().getFileModTime(f);
-		auto lastTime    = fileStates[f].lastChange;
-		if (lastTime == currentTime and not fileStates[f].hasChanged) {
-			for (auto const& file : fileStates[f].optDependencies) {
-				filesOfInterest.insert(file);
-			}
-			continue;
-		}
-		fileStates[f].lastChange = currentTime;
-		fileStates[f].hasChanged = true;
-
-		std::ifstream ifs(f);
-		std::string line;
-		bool optionalSection = false;
-
-		while (std::getline(ifs, line)) {
-			auto parts = utils::explode(line, std::vector<std::string>{" ", "\t"});
-			if (parts.size() == 1 && parts[0] == "#endif") {
-				optionalSection = false;
-			} else if (parts.size() == 2 && parts[0] == "#ifdef" && parts[1].substr(0, 7) == "BUSY_") {
-				optionalSection = true;
-			} else if (optionalSection
-			    && parts.size() == 2 && parts[0] == "#include"
-			    && parts[1].front() == '<' && parts[1].back() == '>') {
-
-				auto pos1 = parts[1].find("<")+1;
-				auto pos2 = parts[1].find(">")-pos1;
-
-				auto file = parts[1].substr(pos1, pos2);
-				filesOfInterest.insert(file);
-				fileStates[f].optDependencies.push_back(file);
-			}
-
-		}
-	}
-
-	for (auto const& file : filesOfInterest) {
-		for (auto const& e : _projects) {
-			auto& project = e.second;
-			if (&project == this) continue;
-
-			for (auto const& h : project.getAllHFilesFlat()) {
-				if (file == h) {
-					auto package = project.getPackagePath();
-					auto pList   = utils::explode(package, "/");
-					auto d       = pList.back() + "/" + project.getName();
-					if (std::find(dep.begin(), dep.end(), d) == dep.end()) {
-						dep.emplace_back(d);
-					}
-					break;
-				}
-			}
-		}
-	}
-
-	return dep;
-}
-
-
-auto Project::getAllFiles(std::set<std::string> const& _ending) const -> std::vector<std::string> {
-	std::vector<std::string> files;
-
-	std::vector<std::string> allPaths;
-	allPaths.emplace_back(std::string("./") + getPackagePath() + "/src/" + getPath() + "/");
-	for (auto const& i : getLegacy().includes) {
-		allPaths.emplace_back(std::string("./") + getPackagePath() + "/" + i + "/");
-	}
-
-	for (auto const& p : allPaths) {
-		if (not utils::dirExists(p)) continue;
-
-		auto allFiles = utils::listFiles(p, true);
-		for (auto const& f : allFiles) {
-			for (auto const& ending : _ending) {
-				if (utils::isEndingWith(f, ending)) {
-					files.push_back(p + f);
-					break;
-				}
-			}
-		}
-	}
-	return files;
-}
-auto Project::getAllFilesFlat(std::set<std::string> const& _ending, bool noending) const -> std::vector<std::string> {
-	std::vector<std::string> files;
-
-	std::vector<std::tuple<std::string, std::string>> allPaths;
-	allPaths.emplace_back(std::make_tuple(std::string("./") + getPackagePath() + "/src/" + getPath() + "/", getPath() + "/"));
-	for (auto const& i : getLegacy().includes) {
-		allPaths.emplace_back(std::make_tuple(std::string("./") + getPackagePath() + "/" + i + "/", std::string("")));
-	}
-
-	for (auto const& p : allPaths) {
-		if (not utils::dirExists(std::get<0>(p))) continue;
-
-		auto allFiles = utils::listFiles(std::get<0>(p), true);
-		for (auto const& f : allFiles) {
-			if (noending and f.find(".") == std::string::npos) {
-				files.push_back(std::get<1>(p) + f);
-				continue;
-			}
-			for (auto const& ending : _ending) {
-				if (utils::isEndingWith(f, ending)) {
-					files.push_back(std::get<1>(p) + f);
-					break;
-				}
-			}
-		}
-	}
-	return files;
-}
-auto Project::getAllFilesFlatNoEnding() const -> std::vector<std::string> {
-	std::vector<std::string> files;
-
-	std::vector<std::tuple<std::string, std::string>> allPaths;
-	allPaths.emplace_back(std::make_tuple(std::string("./") + getPackagePath() + "/src/" + getPath() + "/", getPath() + "/"));
-	for (auto const& i : getLegacy().includes) {
-		allPaths.emplace_back(std::make_tuple(std::string("./") + getPackagePath() + "/" + i + "/", std::string("")));
-	}
-
-	for (auto const& p : allPaths) {
-		if (not utils::dirExists(std::get<0>(p))) continue;
-
-		auto allFiles = utils::listFiles(std::get<0>(p), true);
-		for (auto const& f : allFiles) {
-			if (f.find('.') == std::string::npos) {
-				files.push_back(std::get<1>(p) + f);
-				break;
-			}
-		}
-	}
-	return files;
-}
-
-
-
-
-auto Project::getAllCppFiles() -> std::vector<std::string>& {
-	if (cppFiles.empty()) {
-		cppFiles = getAllFiles({".cpp"});
-		std::sort(cppFiles.begin(), cppFiles.end());
-	}
-	return cppFiles;
-}
-auto Project::getAllCFiles() -> std::vector<std::string>& {
-	if (cFiles.empty()) {
-		cFiles = getAllFiles({".c"});
-		std::sort(cFiles.begin(), cFiles.end());
-	}
-	return cFiles;
-}
-auto Project::getAllHFiles() const -> std::vector<std::string> const& {
-	if (hFiles.empty()) {
-		hFiles = getAllFiles({".h", ".hpp"});
-		std::sort(hFiles.begin(), hFiles.end());
-	}
-
-	return hFiles;
-}
-auto Project::getAllHFilesFlat() const -> std::vector<std::string> const& {
-	if (hFilesFlat.empty()) {
-		hFilesFlat = getAllFilesFlat({".h", ".hpp"}, true);
-		std::sort(hFilesFlat.begin(), hFilesFlat.end());
-	}
-
-	return hFilesFlat;
-}
-
-
-
-auto Project::getComIncludePaths() const -> std::vector<std::string> {
-	std::vector<std::string> retList;
-
-	// add all includes from legacy
-	for (auto const& i : getLegacy().includes) {
-		retList.emplace_back(getPackagePath() + "/" + i);
-	}
-
-	// add all local includes
-	retList.emplace_back(getPackagePath()+"/src/" + getPath());
-
-	// add itself as inlude
-	retList.emplace_back(getPackagePath()+"/src/");
-
-	return retList;
-
-}
-auto Project::getComSystemIncludePaths(std::set<Project*> const& _dependencies) const -> std::vector<std::string> {
-	std::vector<std::string> retList;
-
-	// Adding all includes of dependent libraries
-	for (auto const& project : _dependencies) {
-		retList.push_back(project->getPackagePath()+"/src");
-		for (auto const& i : project->getLegacy().includes) {
-			retList.push_back(project->getPackagePath()+"/"+i);
-		}
-		for (auto const& i : project->getLegacy().systemIncludes) {
-			retList.push_back(i);
-		}
-	}
-
-	return retList;
-}
-
-auto Project::getComDefines(std::set<Project*> const& _dependencies) const -> std::vector<std::string> {
-	std::vector<std::string> retList;
-
-	// Adding macro to indicate busy is being used
-	retList.push_back("-DBUSY");
-
-	// Adding all defines of dependend libraries
-	for (auto const& project : _dependencies) {
-		std::string def = std::string("-DBUSY_");
-		for (auto const& c : project->getName()) {
-			if ((c >= 'A' and c <= 'Z')
-			    or (c >= 'a' and c <= 'z')
-			    or (c >= '0' and c <= '9')) {
-				def += std::toupper(c);
-			} else {
-				def += "_";
-			}
-		}
-		retList.push_back(def);
-	}
-
-	// Adding library itself to busy definition
+namespace busy {
+	Project::Project(busyConfig::Project const& _project, Package* _package)
+		: mPackage { _package }
 	{
-		std::string def = std::string("-DBUSY_");
-		for (auto const& c : getName()) {
-			if ((c >= 'A' and c <= 'Z')
-			    or (c >= 'a' and c <= 'z')
-			    or (c >= '0' and c <= '9')) {
-				def += std::toupper(c);
-			} else {
-				def += "_";
-			}
+		mPath           = mPackage->getPath() + "/src";
+		mName           = _project.name;
+		mHasConfigEntry = true;
+		mType           = _project.type;
+		mWholeArchive   = _project.wholeArchive;
+		mAutoDependenciesDiscovery = _project.mAutoDependenciesDiscovery;
+		mSystemLibraries = _project.depLibraries;
+		mSingleFileProjects = _project.mSingleFileProjects;
+
+		for (auto s : _project.dependencies) {
+			mDependenciesAsString.insert(s);
 		}
-		retList.push_back(def);
+
+		mSourcePaths.emplace_back(mPackage->getPath() + "/src");
+		mIncludePaths.emplace_back(mPackage->getPath() + "/src");
+		for (auto const& f : _project.legacy.includes) {
+			mIncludePaths.emplace_back(mPackage->getPath() + "/" + f);
+		}
+		for (auto const& f : _project.legacy.systemIncludes) {
+			mSystemIncludePaths.emplace_back(f);
+		}
+		for (auto const& f : _project.legacy.systemLibraries) {
+			mSystemLibrariesPaths.push_back(f);
+		}
+		for (auto const& f : _project.legacy.linkingOption) {
+			mLinkingOptions.push_back(f);
+		}
+		discoverSourceFiles();
+		
+		mIsHeaderOnly = (getCppFiles().size() == 0 && getCFiles().size() == 0);
 	}
 
-	return retList;
+	Project::Project(std::string const& _name, Package* _package)
+		: mPackage { _package }
+	{
+		mPath = mPackage->getPath() + "/src";
+		mName = _name;
+		if (getIsUnitTest() or getIsExample()) {
+			mType = "executable";
+		} 
+
+		mSourcePaths.emplace_back(mPackage->getPath() + "/src");
+		mIncludePaths.emplace_back(mPackage->getPath() + "/src");
+
+		discoverSourceFiles();
+		mIsHeaderOnly = (getCppFiles().size() == 0 && getCFiles().size() == 0);
+	}
+
+	auto Project::getFullName() const -> std::string {
+		return mPackage->getName() + "/" + getName();
+	}
+	bool Project::getIsUnitTest() const {
+		return utils::isStartingWith(mName, "test");
+	}
+	bool Project::getIsExample() const {
+		return utils::isStartingWith(mName, "example") or utils::isStartingWith(mName, "demo");
+	}
+	auto Project::getCppAndCFiles() const -> std::vector<std::string> {
+		auto cppFiles = getCppFiles();
+		for (auto const& f : getCFiles()) {
+			cppFiles.push_back(f);
+		}
+		return cppFiles;
+	}
+
+
+
+	auto Project::getDependenciesRecursive(std::set<Project const*> const& _ignoreProject) const -> std::vector<Project const*> {
+		std::vector<Project const*> retList;
+		for (auto dep : getDependencies()) {
+			if (_ignoreProject.count(dep) == 0) {
+				retList.push_back(dep);
+			}
+		}
+		auto iterateList = retList;
+		for (auto const& project : iterateList) {
+			for (auto p : project->getDependenciesRecursive(_ignoreProject)) {
+				retList.push_back(p);
+			}
+		}
+		std::map<Project const*, int> entryCount;
+		for (auto entry : retList) {
+			entryCount[entry] += 1;
+		}
+		retList.erase(std::remove_if(retList.begin(), retList.end(), [&entryCount] (Project const* p) {
+			entryCount[p] -= 1;
+			return entryCount[p] > 0;
+		}), retList.end());
+
+		return retList;
+	}
+
+	auto Project::getSystemLibrariesPathsRecursive() const -> std::vector<std::string> {
+		auto retList = getSystemLibrariesPaths();
+		for (auto const& project : getDependencies()) {
+			for (auto p : project->getSystemLibrariesPathsRecursive()) {
+				retList.push_back(p);
+			}
+		}
+
+		std::map<std::string, int> entryCount;
+		for (auto entry : retList) {
+			entryCount[entry] += 1;
+		}
+		retList.erase(std::remove_if(retList.begin(), retList.end(), [&entryCount] (std::string p) {
+			entryCount[p] -= 1;
+			return entryCount[p] > 0;
+		}), retList.end());
+
+		return retList;
+	}
+
+	auto Project::getLinkingOptionsRecursive() const -> std::vector<std::string> {
+		auto retList = getLinkingOptions();
+		for (auto const& project : getDependencies()) {
+			for (auto p : project->getLinkingOptionsRecursive()) {
+				retList.push_back(p);
+			}
+		}
+
+		std::map<std::string, int> entryCount;
+		for (auto entry : retList) {
+			entryCount[entry] += 1;
+		}
+		retList.erase(std::remove_if(retList.begin(), retList.end(), [&entryCount] (std::string p) {
+			entryCount[p] -= 1;
+			return entryCount[p] > 0;
+		}), retList.end());
+
+		return retList;
+	}
+
+	void Project::discoverSourceFiles() {
+		mSourceFiles["cpp"]       = {};
+		mSourceFiles["c"]         = {};
+		mSourceFiles["incl"]      = {};
+		mSourceFiles["incl-flat"] = {};
+		// Discover cpp and c files
+		auto sourcePaths = getSourcePaths();
+		sourcePaths[0] += "/" + getName();
+		for (auto const& dir : sourcePaths) {
+			for (auto const &f : utils::listFiles(dir, true)) {
+				if (utils::isEndingWith(f, ".cpp")) {
+					mSourceFiles["cpp"].push_back(dir + "/" + f);
+				} else if (utils::isEndingWith(f, ".c")) {
+					mSourceFiles["c"].push_back(dir + "/" + f);
+				}
+			}
+		}
+		// Discover header files
+		auto includePaths = getIncludePaths();
+		includePaths[0] += "/" + getName();
+		for (auto const& dir : includePaths) {
+			for (auto const& f : utils::listFiles(dir, true)) {
+				mSourceFiles["incl"].push_back(dir + "/" + f);
+				if (&dir == &includePaths[0]) {
+					mSourceFiles["incl-flat"].push_back(getName() + "/" + f);
+				} else {
+					mSourceFiles["incl-flat"].push_back(f);
+				}
+			}
+		}
+	}
+
+	auto Project::getIncludeAndDependendPaths() const -> std::vector<std::string> {
+		auto includePaths = getIncludePaths();
+		includePaths.push_back(includePaths.front() + "/" + getName());
+		return includePaths;
+	}
+	auto Project::getSystemIncludeAndDependendPaths() const -> std::vector<std::string> {
+		std::vector<std::string> includePaths;
+
+		std::set<std::string> alreadyAdded;
+
+		for (auto dep : getDependenciesRecursive()) {
+			for (auto& p : dep->getIncludePaths()) {
+				if (alreadyAdded.count(p) == 0) {
+					alreadyAdded.insert(p);
+					includePaths.emplace_back(std::move(p));
+				}
+			}
+		}
+		return includePaths;
+	}
+	auto Project::getLegacySystemIncludeAndDependendPaths() const -> std::vector<std::string> {
+		auto includePaths = getSystemIncludePaths();
+
+		std::set<std::string> alreadyAdded;
+
+		for (auto dep : getDependenciesRecursive()) {
+			for (auto& p : dep->getSystemIncludePaths()) {
+				if (alreadyAdded.count(p) == 0) {
+					alreadyAdded.insert(p);
+					includePaths.emplace_back(std::move(p));
+				}
+			}
+		}
+		return includePaths;
+	}
+
+
+	void Project::discoverDependencies() {
+
+		// scan all files to detect dependencies
+		if (mAutoDependenciesDiscovery) {
+			for (auto s : {"cpp", "c", "incl"}) {
+				for (auto const& file : mSourceFiles.at(s)) {
+					discoverDependenciesInFile(file);
+				}
+			}
+		}
+		for (auto const& d : mDependenciesAsString) {
+			if (mPackage->getWorkspace()->hasProject(d)) {
+				mDependencies.push_back(&mPackage->getWorkspace()->getProject(d));
+			}
+		}
+	}
+	void Project::discoverDependenciesInFile(std::string const& _file) {
+		// First check if this file is cached
+		auto& fileStat = mPackage->getWorkspace()->getFileStat(_file);
+
+
+		// If file modification time has changed, rescan it
+		auto modTime = utils::getFileModificationTime(_file);
+		if (modTime != fileStat.mFileDiscovery.lastChange) {
+
+
+			std::ifstream ifs(_file);
+			std::string line;
+
+			std::set<std::string> dependenciesAsString;
+
+			std::set<std::string> includesOutsideOfThisProject;
+			std::set<std::string> includesOutsideOfThisProjectOptional;
+
+			bool optionalSection = false;
+
+			while (std::getline(ifs, line)) {
+				// check if it is '#endif'
+				if (checkIfMakroEndif(line.c_str())) {
+					optionalSection = false;
+				} else if (checkIfMakroIfAndBusy(line.c_str())) {
+					optionalSection = true;
+				} else if (checkIfMakroSystemInclude(line.c_str())) {
+					auto parts = utils::explode(line, std::vector<std::string>{" ", "\t"});
+
+					std::string includeFile;
+					if (parts.size() == 0) continue;
+					if (parts.size() == 1) {
+						includeFile = parts[0];
+					} else {
+						includeFile = parts[1];
+					}
+
+					auto pos1 = includeFile.find("<")+1;
+					auto pos2 = includeFile.find(">")-pos1;
+
+					auto file = includeFile.substr(pos1, pos2);
+
+					if (optionalSection) {
+						includesOutsideOfThisProjectOptional.insert(file);
+						includesOutsideOfThisProject.erase(file);
+					} else if (includesOutsideOfThisProjectOptional.count(file) == 0) {
+						includesOutsideOfThisProject.insert(file);
+					}
+				}
+			}
+
+			// Check all found #include<...> statements, and check if these refer to a known project
+			auto packages = mPackage->getAllDependendPackages();
+			packages.push_back(mPackage);
+			for (auto const& file : includesOutsideOfThisProject) {
+				bool found = false;
+				for (auto const& package : packages) {
+					for (Project const& project : package->getProjects()) {
+						auto fileToCheck = file;
+						for (auto const& include : project.getIncludeFilesFlat()) {
+							if (fileToCheck == include) {
+								if (std::find(mDependencies.begin(), mDependencies.end(), &project) == mDependencies.end()) {
+									if (getFullName() != project.getFullName()) {
+										dependenciesAsString.insert(project.getFullName());
+									}
+								}
+								found = true;
+								break;
+							}
+						}
+						if (found) break;
+					}
+					if (found) break;
+				}
+			}
+
+			// Do the same for optional dependencies, these must search through all packages
+			// Check all found #include<...> statements, and check if these refer to a known project
+			for (auto const& file : includesOutsideOfThisProjectOptional) {
+				bool found = false;
+				for (auto const& package : mPackage->getWorkspace()->getPackages()) {
+					for (Project const& project : package.getProjects()) {
+						auto fileToCheck = project.getPath() + "/" + file;
+						for (auto const& include : project.getIncludeFiles()) {
+							if (fileToCheck == include) {
+								if (std::find(mDependencies.begin(), mDependencies.end(), &project) == mDependencies.end()) {
+									dependenciesAsString.insert(project.getFullName());
+								}
+								found = true;
+								break;
+							}
+						}
+						if (found) break;
+					}
+					if (found) break;
+				}
+			}
+			fileStat.mFileDiscovery.lastChange = modTime;
+			fileStat.mFileDiscovery.dependenciesAsString = dependenciesAsString;
+		}
+		for (auto const& s : fileStat.mFileDiscovery.dependenciesAsString) {
+			mDependenciesAsString.insert(s);
+		}
+	}
 }
-
-
-
-
-}
-

@@ -10,23 +10,27 @@ using namespace busy;
 
 namespace commands {
 
-void toolchains(bool _isTerminal) {
+void flavors(bool _isTerminal) {
 	Workspace ws;
-	auto toolchains    = ws.getToolchains();
+	auto flavors = ws.getFlavors();
 
 	std::string green = TERM_GREEN;
 	std::string reset = TERM_RESET;
+
 	if (not _isTerminal) {
-		green = "";
-		reset = "";
+		green = reset = "";
 	}
+
 	int longestString = 0;
-	for (auto const& e : toolchains) {
+	for (auto const& e : flavors) {
 		longestString = std::max(longestString, int(e.first.length()));
 	}
 
-	for (auto const& e : toolchains) {
-		if (e.first == ws.getSelectedToolchain()) {
+	for (auto const& e : flavors) {
+		bool match = (e.second->buildMode == ws.getSelectedBuildMode()
+			and e.second->toolchain == ws.getSelectedToolchain());
+
+		if (match) {
 			std::cout << green;
 		}
 		std::cout << e.first;
@@ -34,7 +38,7 @@ void toolchains(bool _isTerminal) {
 			std::cout << " ";
 		}
 		std::cout << std::endl;
-		if (e.first == ws.getSelectedToolchain()) {
+		if (match) {
 			std::cout << reset;
 		}
 

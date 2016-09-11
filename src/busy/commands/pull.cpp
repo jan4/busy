@@ -1,12 +1,13 @@
 #include "commands.h"
-#include <threadPool/threadPool.h>
+
+#include "git.h"
+#include <busyUtils/busyUtils.h>
 #include <iostream>
+#include <threadPool/threadPool.h>
 
 #define TERM_RED                        "\033[31m"
 #define TERM_GREEN                      "\033[32m"
 #define TERM_RESET                      "\033[0m"
-
-using namespace aBuild;
 
 namespace commands {
 
@@ -14,7 +15,7 @@ void pull() {
 	threadPool::ThreadPool<std::string> threadPool;
 	threadPool.spawnThread([&](std::string const& path) {
 		static std::mutex mutex;
-		if (git::isDirty(path)) {
+		if (git::isDirty(path, true)) {
 			std::unique_lock<std::mutex> lock(mutex);
 			std::cout << TERM_RED "ignore " << path << ": Dirty repository" TERM_RESET << std::endl;
 		} else {

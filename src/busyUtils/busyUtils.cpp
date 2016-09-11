@@ -1,4 +1,4 @@
-#include "utils.h"
+#include "busyUtils.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -39,14 +39,14 @@ namespace utils {
 		call.push_back(_dir);
 		process::Process p(call);
 		if (p.getStatus() != 0) {
-			throw std::runtime_error("error running rm");
+			throw std::runtime_error("error running rm: " + p.cerr() + p.cout());
 		}
 	}
 	void mv(std::string const& _src, std::string const& _dest) {
 		std::vector<std::string> call ({"mv", _src, _dest});
 		process::Process p(call);
 		if (p.getStatus() != 0) {
-			throw std::runtime_error("error running rm");
+			throw std::runtime_error("error running mv: " + p.cerr() + p.cout());
 		}
 	}
 
@@ -67,7 +67,8 @@ namespace utils {
 		return ::utils::basename(_file);
 	}
 	bool fileExists(std::string const& _file) {
-		return std::ifstream(_file).good();
+		struct stat buffer;
+		return (stat (_file.c_str(), &buffer) == 0);
 	}
 	bool dirExists(std::string const& _file) {
 		auto l = utils::explode(_file, "/");
@@ -91,6 +92,11 @@ namespace utils {
 
 	auto listFiles(std::string const& _dir, bool recursive) -> std::vector<std::string> {
 		std::vector<std::string> entryList;
+
+		if (not fileExists(_dir)) {
+			return entryList;
+		}
+
 
 		DIR* dir;
 		struct dirent* dirEntry;
@@ -173,7 +179,7 @@ namespace utils {
 		return sub == start;
 	}
 
-	std::vector<std::string> explode(std::string const& _str, std::string const& _del) {
+	auto explode(std::string const& _str, std::string const& _del) -> std::vector<std::string> {
 		auto str = _str;
 		std::vector<std::string> retList;
 		while (str.length() > 0) {
@@ -191,7 +197,7 @@ namespace utils {
 		return retList;
 	}
 
-	std::vector<std::string> explode(std::string const& _str, std::vector<std::string> const& _del) {
+	auto explode(std::string const& _str, std::vector<std::string> const& _del) -> std::vector<std::string> {
 		auto str = _str;
 		std::vector<std::string> retList;
 		while (str.length() > 0) {
@@ -254,7 +260,22 @@ namespace utils {
 			throw std::runtime_error("chdir to "+_string+" from "+cwd()+" failed");
 		}
 	}
-	std::string sanitize(std::string const& _s) {
+
+
+	void convertDFileToDDFile(std::string const& _inFile, std::string const& _outFile) {
+		std::ifstream ifs(_inFile);
+		std::ofstream ofs(_outFile);
+		for (std::string line; std::getline(ifs, line);) {
+			auto depFiles = explode(line, std::vector<std::string> {" ", "\\"});
+			for (auto const& s : depFiles) {
+				if (s.length() > 0 && s.back() != ':') {
+					ofs << s << std::endl;
+				}
+			}
+		}
+	}
+
+	auto sanitize(std::string const& _s) -> std::string {
 		std::string r;
 		for (char c : _s) {
 			if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
@@ -266,9 +287,45 @@ namespace utils {
 		return r;
 	}
 
+	auto sanitizeForMakro(std::string name) -> std::string {
+		for (auto& c : name) {
+			if ((c >= 'A' and c <= 'Z')
+				or (c >= 'a' and c <= 'z')
+				or (c >= '0' and c <= '9')) {
+				c = std::toupper(c);
+			} else {
+				c = '_';
+			}
+		}
+		return name;
+	}
+
+
 	void sleep(unsigned int _s) {
 		::sleep(_s);
 	}
+	bool validPackageName(std::string const& _str) {
+		if (_str.size() == 0) return false;
+		for (auto c : _str) {
+			if (not (c == '_' 
+				or (c >= 'a' and c <= 'z')
+				or (c >= 'A' and c <= 'Z')
+				or (c >= '0' and c <= '9')
+				or (c == '-'))) return false;
+		}
+		return true;
+	}
+	auto getDate() -> std::string {
+		process::Process p({"date", "+%Y%m%d-%H%M"});
+		if (p.getStatus() != 0) {
+			throw std::runtime_error("error running date: " + p.cerr());
+		}
+		auto out = p.cout();
+		out.pop_back();
+		return out;
+	}
+
+
 
 	AtomicWrite::AtomicWrite(std::string  _fileName)
 		: mFileName (std::move(_fileName))

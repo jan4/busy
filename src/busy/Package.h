@@ -1,62 +1,61 @@
 #pragma once
 
-#include "Installation.h"
+#include "Flavor.h"
 #include "Override.h"
-#include "PackageURL.h"
 #include "Project.h"
 #include "Toolchain.h"
-#include "Flavor.h"
 
-namespace aBuild {
+#include <list>
+#include <string>
 
-	using ExtRepositories = std::vector<PackageURL>;
-	using Projects        = std::vector<Project>;
-	using Installations   = std::vector<Installation>;
-	using Toolchains      = std::vector<Toolchain>;
-	using Overrides       = std::vector<Override>;
-	using Flavors         = std::map<std::string, Flavor>;
+namespace busy {
+	class Workspace;
+
+	struct PackageURL {
+		std::string name;
+		std::string url;
+		std::string branch;
+	};
 
 	class Package {
 	private:
-		std::string     name;
-		PackageURL      url;
-		ExtRepositories extRepositories;
-		Projects        projects;
-		Overrides       overrides;
-		Installations   installations;
-		Toolchains      toolchains;
-		Flavors         flavors;
+		Workspace* mWorkspace;
+
+		std::string   mName;
+		std::string   mPath;
+
+		std::list<Project> mProjects;
+		std::vector<PackageURL> mExternalRepURLs;
+		std::vector<Package*>   mExternalPackages;
+
+		std::map<std::string, Flavor>    mFlavors;
+		std::map<std::string, Toolchain> mToolchains;
+		Overrides                        mOverrides;
 
 	public:
-		Package(PackageURL const& _url);
 
-		auto getName() const -> std::string const&;
-		void setName(std::string const& _name);
+		Package(std::string const& _path, Workspace* _workspace);
 
-		auto getURL() const -> PackageURL const&;
+		void setupPackageDependencies();
 
-		auto getExtRepositories() const -> ExtRepositories const&;
-		auto getProjects() const -> Projects const&;
-		auto accessProjects() -> Projects&;
+		auto getWorkspace() const -> Workspace* { return mWorkspace; }
 
-		auto getOverrides() const -> Overrides const&;
-		auto getInstallations() const -> Installations const&;
-		auto getToolchains() const -> Toolchains const&;
-		auto getFlavors() const -> Flavors const&;
 
-		template <typename Node>
-		void serialize(Node& node) {
-			node["name"]            % name;
-			node["extRepositories"] % extRepositories;
-			node["projects"]        % projects;
-			node["overrides"]       % overrides;
-			node["installations"]   % installations;
-			node["toolchains"]      % toolchains;
-			node["flavors"]         % flavors;
-			for (auto& p : projects) {
-				p.setPackagePath(url.getPath());
-			}
-		}
 
+		auto getName() const -> std::string const& { return mName; }
+		auto getPath() const -> std::string const& { return mPath; }
+		auto getProjects() const -> std::list<Project> const& { return mProjects; }
+		auto getProjects()       -> std::list<Project>&       { return mProjects; }
+
+		auto getExternalPackageURLs() -> std::vector<PackageURL> const& { return mExternalRepURLs; }
+		auto getExternalPackages() -> std::vector<Package*> const& { return mExternalPackages; }
+		auto getAllDependendPackages() -> std::vector<Package*>;
+
+		auto getFlavors() const -> std::map<std::string, Flavor> const& { return mFlavors; }
+		auto getToolchains() const -> std::map<std::string, Toolchain> const& { return mToolchains; }
+
+		bool hasProject(std::string const& _name) const;
+		auto getProject(std::string const& _name) const -> Project const&;
+		auto getOverrides() const -> Overrides const& { return mOverrides; }
 	};
 }

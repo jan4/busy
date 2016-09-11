@@ -1,213 +1,334 @@
 #include "Workspace.h"
-#include <iostream>
 
-#include "utils.h"
-#include "estd.h"
-
+#include <algorithm>
+#include <busyUtils/busyUtils.h>
 #include <iostream>
+#include <serializer/serializer.h>
+
+
+namespace busy {
 
 namespace {
-	const std::string workspaceFile { ".aBuild/workspace.bin" };
+	std::string extRepPath { "./extRepositories" };
+	std::string busyPath   { "./.busy" };
+	std::string workspaceFile { ".busy/workspace.bin" };
+
 }
 
-
-namespace aBuild {
-
-Workspace::Workspace(std::string const& _path)
-	: path {_path + "/"} {
-
-	if (utils::fileExists(path + workspaceFile)) {
-		serializer::binary::read(path + workspaceFile, configFile);
+Workspace::Workspace(bool _noSaving)
+	: mNoSaving { _noSaving }
+{
+	// check if certain folders exists
+	for (std::string s : {extRepPath , busyPath}) {
+		if (not utils::fileExists(s)) {
+			utils::mkdir(s);
+		}
 	}
-	createABuildFolder();
-	createPackageFolder();
+
+	if (utils::fileExists(workspaceFile)) {
+		serializer::binary::read(workspaceFile, mConfig);
+	}
+
+
+	loadPackageFolders();
+	loadPackages();
+	discoverSystemToolchains();
 }
 Workspace::~Workspace() {
-	save();
+	if (not mNoSaving) {
+		utils::AtomicWrite atomic(workspaceFile);
+		serializer::binary::write(atomic.getTempName(), mConfig);
+		atomic.close();
+
+	//	serializer::yaml::write(workspaceFile + ".yaml", mConfig);
+	}
 }
 
-void Workspace::save() {
-	std::string outFile = path + workspaceFile;
-	utils::AtomicWrite atomic(outFile);
-	serializer::binary::write(atomic.getTempName(), configFile);
-	atomic.close();
+auto Workspace::getPackageFolders() const -> std::vector<std::string> const& {
+	return mPackageFolders;
+}
+auto Workspace::getPackages() const -> std::list<Package> const& {
+	return mPackages;
 }
 
-auto Workspace::getAllMissingPackages() const -> std::vector<PackageURL> {
-	std::set<PackageURL> urlSet;
-
-	auto requiredPackages = getAllRequiredPackages();
-	auto allPackages      = utils::listDirs(path + "extRepositories", true);
-
-	for (auto const& r : requiredPackages) {
-		bool found {false};
-		for (auto const& p : allPackages) {
-			if (p == r.getName()) {
-				found = true;
-				break;
-			}
-		}
-		if (not found) {
-			urlSet.insert(r);
+bool Workspace::hasPackage(std::string const& _name) const {
+	for (auto const& package : mPackages) {
+		if (package.getName() == _name) {
+			return true;
 		}
 	}
-	std::vector<PackageURL> retList;
-	for (auto const& p : urlSet) {
-		retList.push_back(p);
-	}
-	return retList;
+	return false;
 }
-auto Workspace::getAllValidPackages(bool _includingRoot) const -> std::vector<Package> {
-	std::vector<Package> retList;
-	// Reading external repository directory finding available repositories
-	auto allPackages = utils::listDirs(path + "extRepositories", true);
-	for (auto const& s : allPackages) {
-		try {
-			std::string path2 = path + "extRepositories/" + s;
-			Package p {PackageURL()};
-			serializer::yaml::read(path2 + "/busy.yaml", p);
 
-			retList.push_back(std::move(p));
-		} catch (...) {}
-	}
-	if (_includingRoot) {
-		Package p {PackageURL()};
-		serializer::yaml::read("./busy.yaml", p);
-		retList.push_back(std::move(p));
-	}
-	return retList;
+auto Workspace::getPackage(std::string const& _name) const -> Package const& {
+	return const_cast<Workspace*>(this)->getPackage(_name);
 }
-auto Workspace::getAllInvalidPackages() const -> std::vector<std::string> {
-	std::vector<std::string> retList;
-	// Reading repository directory finding available repositories
-	auto allPackages = utils::listDirs(path + "extRepositories", true);
-	for (auto const& s : allPackages) {
-		try {
-			std::string path2 = path + "extRepositories/" + s;
-			Package p {PackageURL()};
-			serializer::yaml::read(path2 + "/busy.yaml", p);
-		} catch (...) {
-			retList.push_back(s);
+auto Workspace::getPackage(std::string const& _name) -> Package& {
+	for (auto& package : mPackages) {
+		if (package.getName() == _name) {
+			return package;
 		}
 	}
-	return retList;
+	throw std::runtime_error("Couldn't find packages with name: " + _name);
 }
-
-auto Workspace::getAllRequiredPackages() const -> std::vector<PackageURL> {
-	std::vector<PackageURL> retList;
-
-	std::vector<Package> openPackages;
-	{
-		Package p {PackageURL()};
-		serializer::yaml::read(path + "busy.yaml", p);
-		openPackages.push_back(std::move(p));
+bool Workspace::hasProject(std::string const& _name) const {
+	auto parts = utils::explode(_name, "/");
+	if (parts.size() > 2) {
+		throw std::runtime_error("given invalid full project name: " + _name + ". It should look like this Package/Project");
+	} else if (parts.size() == 2) {
+		if (not hasPackage(parts[0])) {
+			return false;
+		}
+		auto const& package = getPackage(parts[0]);
+		return package.hasProject(parts[1]);
 	}
-	while(not openPackages.empty()) {
-		Package p = openPackages.back();
-		openPackages.pop_back();
-		for (auto const& p2 : p.getExtRepositories()) {
-			if (estd::find(retList, p2) == retList.end()) {
-				retList.push_back(p2);
 
-				PackageURL url{p2};
-				Package p {url};
-				try {
-					serializer::yaml::read(url.getPath() + "/busy.yaml", p);
-					openPackages.push_back(std::move(p));
-				} catch(...) {}
+	for (auto const& package : mPackages) {
+		for (auto const& project : package.getProjects()) {
+			if (project.getName () == _name) {
+				return true;
 			}
 		}
 	}
-	return retList;
+	return false;
 }
-auto Workspace::getAllNotRequiredPackages() const -> std::vector<std::string> {
-	auto allRequired = getAllRequiredPackages();
-	auto allPackages = utils::listDirs(path + "extRepositories", true);
 
-	for (auto const& s : allRequired) {
-		PackageURL url {s};
-		auto iter = estd::find(allPackages, url.getName());
-		if (iter != allPackages.end()) {
-			allPackages.erase(iter);
-		}
-	}
-	return allPackages;
-}
-auto Workspace::getAllRequiredProjects()    const -> std::map<std::string, Project> {
-	std::map<std::string, Project> retList;
-
-	// Adding root package projects
-	{
-		Package p {PackageURL()};
-		serializer::yaml::read(path + "busy.yaml", p);
-
-		for (auto project : p.getProjects()) {
-			retList[project.getPath()] = project;
-		}
+auto Workspace::getProject(std::string const& _name) const -> Project const& {
+	auto parts = utils::explode(_name, "/");
+	if (parts.size() > 2) {
+		throw std::runtime_error("given invalid full project name: " + _name + ". It should look like this Package/Project");
+	} else if (parts.size() == 2) {
+		auto const& package = getPackage(parts[0]);
+		return package.getProject(parts[1]);
 	}
 
-	// Adding all dependent projects
-	auto required = getAllRequiredPackages();
-	for (auto url : required) {
-		Package package {url};
-		serializer::yaml::read(url.getPath() + "/busy.yaml", package);
-		for (auto project : package.getProjects()) {
-			retList[project.getName()] = project;
-		}
-	}
-	return retList;
-}
-auto Workspace::getExcludedProjects() const -> std::set<std::string> {
-	std::set<std::string> retList;
-	// Adding root package projects
-	{
-		Package p {PackageURL()};
-		serializer::yaml::read(path + "busy.yaml", p);
-		for (auto o : p.getOverrides()) {
-			auto chains = o.getExcludeFromToolchains();
-			if (std::find(chains.begin(), chains.end(), configFile.getToolchain()) != chains.end()) {
-				retList.insert(o.getProjectToOverride());
+	std::vector<Project const*> matchList;
+	for (auto const& package : mPackages) {
+		for (auto const& project : package.getProjects()) {
+			if (project.getName () == _name) {
+				matchList.push_back(&project);
 			}
 		}
 	}
+	if (matchList.empty()) {
+		throw std::runtime_error("Coudn't find prjoect with name: " + _name);
+	}
+	if (matchList.size() > 1) {
+		std::string list;
+		for (auto const& p : matchList) {
+			list += "  - " + p->getFullName() + "\n";
+		}
+		throw std::runtime_error("Found multiple projects with this name, specifiy the packages they are in:" + list);
+	}
+	return *matchList.at(0);
+}
+auto Workspace::getProjectAndDependencies(std::string const& _name) const -> std::vector<Project const*> {
+	auto ignoreProjects = getExcludedProjects(getSelectedToolchain());
 
-	// Adding all dependent projects
-	auto required = getAllRequiredPackages();
-	for (auto url : required) {
-		Package package {url};
-		serializer::yaml::read(url.getPath() + "/busy.yaml", package);
-		for (auto o : package.getOverrides()) {
-			auto chains = o.getExcludeFromToolchains();
-			if (std::find(chains.begin(), chains.end(), configFile.getToolchain()) != chains.end()) {
-				retList.insert(o.getProjectToOverride());
+	std::vector<Project const*> retProjects;
+
+	std::set<Project const*> flagged;
+	std::vector<Project const*> queued = retProjects;
+
+	if (_name == "") {
+		for (auto const& package : getPackages()) {
+			for (auto const& project : package.getProjects()) {
+				if (project.getType() == "executable" and ignoreProjects.count(&project) == 0) {
+					queued.push_back(&project);
+					flagged.insert(&project);
+				}
+			}
+		}
+	} else {
+		queued.push_back(&getProject(_name));
+		flagged.insert(queued.front());
+	}
+	// Run through queue and get all dependencies
+	while (not queued.empty()) {
+		auto project = queued.back();
+		retProjects.push_back(project);
+		queued.pop_back();
+		for (auto depP : project->getDependencies()) {
+			if (flagged.count(depP) == 0 && ignoreProjects.count(depP) == 0) {
+				flagged.insert(depP);
+				queued.push_back(depP);
 			}
 		}
 	}
-	return retList;
+	std::sort(retProjects.begin(), retProjects.end(), [](Project const* p1, Project const* p2) {
+		return p1->getFullName() < p2->getFullName();
+	});
+	return retProjects;
+}
+auto Workspace::getFlavors() const -> std::map<std::string, Flavor const*> {
+	std::map<std::string, Flavor const*> retMap;
+
+	for (auto const& package : mPackages) {
+		for (auto const& flavor : package.getFlavors()) {
+			retMap[package.getName() + "/" + flavor.first] = &flavor.second;
+		}
+	}
+	return retMap;
+}
+auto Workspace::getToolchains() const -> std::map<std::string, Toolchain const*> {
+	std::map<std::string, Toolchain const*> retMap;
+	for (auto const& toolchain : mSystemToolchains) {
+		retMap[toolchain.first] = &toolchain.second;
+	}
+	for (auto const& package : mPackages) {
+		for (auto const& toolchain : package.getToolchains()) {
+			retMap[toolchain.first] = &toolchain.second;
+		}
+	}
+	return retMap;
+}
+auto Workspace::getBuildModes() const -> std::vector<std::string> {
+	return {"debug", "release", "release_with_symbols"};
 }
 
 
-auto Workspace::getRootPackageName() const -> std::string {
-	Package p {PackageURL()};
-	serializer::yaml::read("busy.yaml", p);
-	return p.getName();
+auto Workspace::getSelectedToolchain() const -> std::string {
+	auto value = mConfig.mToolchainName;
 
+	auto toolchains = getToolchains();
+	auto iter = toolchains.find(value);
+	if (iter == toolchains.end()) {
+		return "system-gcc";
+	}
+	return iter->first;
+}
+auto Workspace::getSelectedBuildMode() const -> std::string {
+	auto modes = getBuildModes();
+	auto iter = std::find(modes.begin(), modes.end(), mConfig.mBuildModeName);
+	if (iter == modes.end()) {
+		return getBuildModes().front();
+	}
+	return *iter;
+}
+
+void Workspace::setSelectedToolchain(std::string const& _toolchainName) {
+	auto toolchains = getToolchains();
+	auto iter = toolchains.find(_toolchainName);
+	if (iter == toolchains.end()) {
+		throw std::runtime_error("Can not set toolchain to " + _toolchainName);
+	}
+	mConfig.mToolchainName = _toolchainName;
+
+}
+void Workspace::setSelectedBuildMode(std::string const& _buildMode) {
+	auto modes = getBuildModes();
+	auto iter = std::find(modes.begin(), modes.end(), _buildMode);
+	if (iter == modes.end()) {
+		throw std::runtime_error("Can not set build mode to " + _buildMode);
+	}
+	mConfig.mBuildModeName = _buildMode;
+}
+
+void Workspace::setFlavor(std::string const& _flavor) {
+	// search for direct match
+	for (auto flavor : getFlavors()) {
+		if (flavor.first == _flavor) {
+			setSelectedToolchain(flavor.second->toolchain);
+			setSelectedBuildMode(flavor.second->buildMode);
+			std::cout << "applying flavor " << _flavor << std::endl;
+			return;
+		}
+	}
+
+	// if no direct match was found, try indirect match (by leaving out the package name
+	std::vector<Flavor const*> matches;
+	for (auto flavor : getFlavors()) {
+		auto parts = utils::explode(flavor.first, "/");
+		if (parts[parts.size()-1] == _flavor) {
+			matches.push_back(flavor.second);
+		}
+	}
+	if (matches.size() == 0) {
+		throw std::runtime_error("flavor " + _flavor + " is unknown");
+	}
+	if (matches.size() > 1) {
+		throw std::runtime_error("flavor " + _flavor + " is ambigious");
+	}
+	setSelectedToolchain(matches.at(0)->toolchain);
+	setSelectedBuildMode(matches.at(0)->buildMode);
 }
 
 
 
-void Workspace::createPackageFolder() {
-	// check if repository folder exists
-	if (not utils::fileExists(path + "extRepositories")) {
-		utils::mkdir(path + "extRepositories");
+
+auto Workspace::getFileStat(std::string const& _file) -> FileStat& {
+	return mConfig.mFileStats[_file];
+}
+auto Workspace::getExcludedProjects(std::string const& _toolchain) const -> std::set<Project const*> {
+	std::set<Project const*> projects;
+	for (auto const& package : mPackages) {
+		for (auto const& over : package.getOverrides()) {
+			if (over.toolchains.count(_toolchain) > 0) {
+				projects.insert(&getProject(over.project));
+			}
+		}
+	}
+	return projects;
+}
+
+
+void Workspace::loadPackageFolders() {
+	mPackageFolders.emplace_back("./");
+	for (auto const& f : utils::listDirs(extRepPath, true)) {
+		mPackageFolders.emplace_back(extRepPath + "/" + f);
 	}
 }
-void Workspace::createABuildFolder() {
-	// check if repository folder exists
-	if (not utils::fileExists(path + ".aBuild")) {
-		utils::mkdir(path + ".aBuild");
+void Workspace::loadPackages() {
+	auto const& folders = getPackageFolders();
+
+	for (auto const& f : folders) {
+		mPackages.emplace_back(f, this);
+	}
+	for (auto& package : mPackages) {
+		package.setupPackageDependencies();
+	}
+	for (auto& package : mPackages) {
+		for (auto& project : package.getProjects()) {
+			project.discoverDependencies();
+		}
 	}
 }
+
+void Workspace::discoverSystemToolchains() {
+	std::map<std::string, std::pair<std::string, Toolchain>> searchPaths {
+	     {"/usr/bin/gcc",       {"system-gcc",       {{{"gcc"}, {}},       {{"g++"}, {}},         {{"ar"}, {}}}}},
+	     {"/usr/bin/gcc-5.3",   {"system-gcc-5.3",   {{{"gcc-5.3"}, {}},   {{"g++-5.3"}, {}},     {{"ar"}, {}}}}},
+	     {"/usr/bin/gcc-5.2",   {"system-gcc-5.2",   {{{"gcc-5.2"}, {}},   {{"g++-5.2"}, {}},     {{"ar"}, {}}}}},
+	     {"/usr/bin/gcc-5.1",   {"system-gcc-5.1",   {{{"gcc-5.1"}, {}},   {{"g++-5.1"}, {}},     {{"ar"}, {}}}}},
+	     {"/usr/bin/gcc-5.0",   {"system-gcc-5.0",   {{{"gcc-5.0"}, {}},   {{"g++-5.0"}, {}},     {{"ar"}, {}}}}},
+	     {"/usr/bin/gcc-4.9",   {"system-gcc-4.9",   {{{"gcc-4.9"}, {}},   {{"g++-4.9"}, {}},     {{"ar"}, {}}}}},
+	     {"/usr/bin/gcc-4.8",   {"system-gcc-4.8",   {{{"gcc-4.8"}, {}},   {{"g++-4.8"}, {}},     {{"ar"}, {}}}}},
+	     {"/usr/bin/gcc-4.7",   {"system-gcc-4.7",   {{{"gcc-4.7"}, {}},   {{"g++-4.7"}, {}},     {{"ar"}, {}}}}},
+	     {"/usr/bin/clang",     {"system-clang",     {{{"clang"}, {}},     {{"clang++"}, {}},     {{"ar"}, {}}}}},
+	     {"/usr/bin/clang-3.6", {"system-clang-3.6", {{{"clang-3.6"}, {}}, {{"clang++-3.6"}, {}}, {{"ar"}, {}}}}},
+	     {"/usr/bin/clang-3.8", {"system-clang-3.8", {{{"clang-3.8"}, {}}, {{"clang++-3.8"}, {}}, {{"ar"}, {}}}}},
+	     };
+	for (auto const& p : searchPaths) {
+		if (utils::fileExists(p.first)) {
+			mSystemToolchains[p.second.first] = p.second.second;
+		}
+	}
+	// check /usr/share/busy/toolchains
+	std::string resources = "/usr/share/busy/toolchains";
+	if (utils::fileExists(resources)) {
+		utils::walkFiles(resources, [&](std::string _file) {
+			auto package = busyConfig::readPackage(resources);
+			for (auto configToolchain : package.toolchains) {
+				Toolchain toolchain;
+				toolchain = configToolchain;
+				mSystemToolchains[configToolchain.name] = toolchain;
+			}
+		});
+	}
+}
+
+
+
 
 
 

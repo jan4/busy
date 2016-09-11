@@ -1,30 +1,21 @@
 #include "commands.h"
+
+#include "Workspace.h"
 #include <iostream>
 
-using namespace aBuild;
+#define TERM_GREEN                      "\033[32m"
+#define TERM_RESET                      "\033[0m"
+
+using namespace busy;
 
 namespace commands {
 
 void toolchain(std::string const& _toolchain) {
-	Workspace ws(".");
-	auto toolchains    = getAllToolchains(ws);
-	auto installations = getAllInstallations(ws);
+	Workspace ws;
 
-	if (toolchains.find(_toolchain) != toolchains.end()) {
-		if (not toolchains.at(_toolchain).isInstalled(installations)) {
-			std::cout << "Toolchain is not installed." << std::endl;
-			std::cout << "trying to install..." << std::endl;
-			toolchains.at(_toolchain).install(installations);
-			if (not toolchains.at(_toolchain).isInstalled(installations)) {
-				return;
-			}
-
-		}
-		ws.accessConfigFile().setToolchain(_toolchain);
-		std::cout << "Set toolchain to " << _toolchain << std::endl;
-		return;
-	}
-	std::cout << "Setting toolchain failed" << std::endl;
+	ws.setSelectedToolchain(_toolchain);
+	std::cout << "current buildMode: " << ws.getSelectedBuildMode() << std::endl;
+	std::cout << "current toolchain: " TERM_GREEN << ws.getSelectedToolchain() << TERM_RESET << std::endl;
 }
 
 }

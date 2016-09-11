@@ -1,168 +1,78 @@
 #pragma once
 
+#include <busyConfig/busyConfig.h>
 
-#include <serializer/serializer.h>
-#include "utils.h"
-
-namespace aBuild {
-	class Workspace;
-
-	using Dependencies = std::vector<std::string>;
-	using DepLibraries = std::vector<std::string>;
-	using Defines      = std::vector<std::string>;
-
-	struct ProjectLegacy {
-		std::vector<std::string> includes;
-		std::vector<std::string> systemIncludes;
-		std::vector<std::string> systemLibraries;
-		std::vector<std::string> linkingOption;
-
-		template<typename Node>
-		void serialize(Node& node) {
-			node["includes"]        % includes;
-			node["systemIncludes"]  % systemIncludes;
-			node["systemLibraries"] % systemLibraries;
-			node["linkingOption"]   % linkingOption;
-		}
-	};
-
+namespace busy {
+	class Package;
 
 	class Project {
 	private:
-		std::string  path;
-		std::string  packagePath;
-		Dependencies dependencies;
-		Dependencies optionalDependencies;
-		DepLibraries depLibraries;
-		Defines      defines;
-		bool         noWarnings;
-		bool         wholeArchive;
-		bool         mAutoDependenciesDiscovery;
-		bool         mIgnore;
-		std::string  type;
-		std::vector<std::string> linkAsShared;
+		Package* mPackage;
 
-		mutable std::vector<std::string> cppFiles;
-		mutable std::vector<std::string> cFiles;
-		mutable std::vector<std::string> hFiles;
-		mutable std::vector<std::string> hFilesFlat;
+		std::string mName;
+		std::string mPath;
+		std::string mType {"library"};
 
-		bool mNeedsSharedVersion { false };
+		bool        mHasConfigEntry {false};
+		bool        mWholeArchive {false};
+		bool        mAutoDependenciesDiscovery {true};
+		bool        mIsHeaderOnly {false};
+		bool        mSingleFileProjects {false}; // Indicates that each .c/.cpp file should be treated as a project/library
 
-		ProjectLegacy legacy;
-
+		std::vector<std::string> mSourcePaths;
+		std::vector<std::string> mIncludePaths;
+		std::vector<std::string> mSystemIncludePaths;
+		std::set<std::string>    mDependenciesAsString;
+		std::vector<Project const*> mDependencies;
+		std::map<std::string, std::vector<std::string>> mSourceFiles;
+		std::vector<std::string> mSystemLibraries;
+		std::vector<std::string> mSystemLibrariesPaths;
+		std::vector<std::string> mLinkingOptions;
 	public:
-		Project()
-			: packagePath  { "." }
-			, noWarnings   { false }
-			, wholeArchive { false }
-			, mAutoDependenciesDiscovery { true  }
-			, mIgnore      { false }
-		{}
+		// Constructed from config file
+		Project(busyConfig::Project const& _project, Package* _package);
 
-		template<typename Node>
-		void serialize(Node& node) {
-			node["name"]                 % path;
-			node["dependencies"]         % dependencies;
-			node["optionalDependencies"] % optionalDependencies;
-			node["type"]                 % type                 or getDefaultTypeByName();
-			node["legacy"]               % legacy;
-			node["depLibraries"]         % depLibraries;
-			node["defines"]              % defines;
-			node["noWarnings"]           % noWarnings           or bool(false);
-			node["wholeArchive"]         % wholeArchive         or bool(false);
-			node["autoDependenciesDiscovery"] % mAutoDependenciesDiscovery or bool(true);
-			node["ignore"]               % mIgnore              or bool(false);
-			node["linkAsShared"]         % linkAsShared;
-		}
-		void set(std::string const& _name) {
-			path = _name;
-			type = getDefaultTypeByName();
-		}
+		// Constructed from folder
+		Project(std::string const& _name, Package* _package);
 
-		void setNeedsSharedVersion() {
-			mNeedsSharedVersion = true;
-		}
-		bool getNeedsSharedVersion() const {
-			return mNeedsSharedVersion;
-		}
+		auto getName() const -> std::string const& { return mName; }
+		auto getFullName() const -> std::string;
+		auto getPath() const -> std::string const& { return mPath; }
+		bool getHasConfigEntry() const { return mHasConfigEntry; }
+		auto getType() const -> std::string const& { return mType; }
+		bool getIsUnitTest() const;
+		bool getIsExample() const;
+		bool getWholeArchive() const { return mWholeArchive; }
+		bool getAutoDependenciesDiscovery() const { return mAutoDependenciesDiscovery; }
+		auto getSourcePaths() const -> std::vector<std::string> const& { return mSourcePaths; }
+		auto getIncludePaths() const -> std::vector<std::string> const& { return mIncludePaths; }
+		auto getSystemIncludePaths() const -> std::vector<std::string> const& { return mSystemIncludePaths; }
+		auto getDependencies() const -> std::vector<Project const*> const& { return mDependencies; }
+		auto getDependenciesRecursive(std::set<Project const*> const& _ignoreProject = {}) const -> std::vector<Project const*>;
+		auto getCFiles() const -> std::vector<std::string> const& { return mSourceFiles.at("c"); }
+		auto getCppFiles() const -> std::vector<std::string> const& { return mSourceFiles.at("cpp"); }
+		auto getCppAndCFiles() const -> std::vector<std::string>;
+		auto getIncludeFiles() const -> std::vector<std::string> const& { return mSourceFiles.at("incl"); }
+		auto getIncludeFilesFlat() const -> std::vector<std::string> const& { return mSourceFiles.at("incl-flat"); }
+		auto getSystemLibraries() const -> std::vector<std::string> const& { return mSystemLibraries; }
+		auto getSystemLibrariesPaths() const -> std::vector<std::string> const& { return mSystemLibrariesPaths; }
+		auto getLinkingOptions() const -> std::vector<std::string> const& { return mLinkingOptions; }
+		auto getSystemLibrariesPathsRecursive() const -> std::vector<std::string>;
+		auto getLinkingOptionsRecursive() const -> std::vector<std::string>;
 
-		auto getType() const -> std::string const& {
-			return type;
-		}
+		bool getIsHeaderOnly() const { return mIsHeaderOnly; }
+		bool getIsSingleFileProjects() const { return mSingleFileProjects; }
 
-		auto getLegacy() const -> ProjectLegacy const& {
-			return legacy;
-		}
-		auto getName() const -> std::string {
-			auto l = utils::explode(getPath(), "/");
-			if (l.size() == 0) throw std::runtime_error("project name is invalid: " + getPath());
-			return l[l.size()-1];
-		}
-		auto getPath() const -> std::string const& {
-			return path;
-		}
-		auto getPackagePath() const -> std::string const& {
-			return packagePath;
-		}
-		void setPackagePath(std::string const& s) {
-			packagePath = s;
-		}
-		void setDependencies(Dependencies _dep) {
-			dependencies = std::move(_dep);
-		}
-		void setOptionalDependencies(Dependencies _dep) {
-			optionalDependencies = std::move(_dep);
-		}
+		auto getIncludeAndDependendPaths() const -> std::vector<std::string>;
+		auto getSystemIncludeAndDependendPaths() const -> std::vector<std::string>;
+		auto getLegacySystemIncludeAndDependendPaths() const -> std::vector<std::string>;
 
-		auto getDependencies() const -> Dependencies const& {
-			return dependencies;
-		}
-		auto getOptionalDependencies() const -> Dependencies const& {
-			return optionalDependencies;
-		}
-		auto getDepLibraries() const -> DepLibraries const& {
-			return depLibraries;
-		}
-		auto getDefines() const -> Defines const& {
-			return defines;
-		}
-		bool getNoWarnings() const {
-			return noWarnings;
-		}
-		bool getWholeArchive() const {
-			return wholeArchive;
-		}
-		auto getLinkAsShared() const -> std::vector<std::string> const& {
-			return linkAsShared;
-		}
-		void setAutoDependenciesDiscovery(bool _auto) {
-			mAutoDependenciesDiscovery = _auto;
-		}
-		bool getAutoDependenciesDiscovery() const {
-			return mAutoDependenciesDiscovery;
-		}
-		bool getIgnore() const {
-			return mIgnore;
-		}
+	private:
+		void discoverSourceFiles();
+	public:
+		void discoverDependencies();
+	private:
+		void discoverDependenciesInFile(std::string const& _file);
 
-		void quickFix();
-
-		auto getDefaultTypeByName() const -> std::string;
-		auto getDefaultDependencies(Workspace* _workspace, std::map<std::string, Project> const& _projects) const -> Dependencies;
-		auto getDefaultOptionalDependencies(Workspace* _workspace, std::map<std::string, Project> const& _projects) const -> Dependencies;
-
-		auto getAllFiles(std::set<std::string> const& _ending) const -> std::vector<std::string>;
-		auto getAllFilesFlat(std::set<std::string> const& _ending, bool noending = false) const -> std::vector<std::string>;
-		auto getAllFilesFlatNoEnding() const -> std::vector<std::string>;
-
-		auto getAllCppFiles() -> std::vector<std::string>&;
-		auto getAllCFiles() -> std::vector<std::string>&;
-		auto getAllHFiles() const -> std::vector<std::string> const&;
-		auto getAllHFilesFlat() const -> std::vector<std::string> const&;
-
-		auto getComIncludePaths() const -> std::vector<std::string>;
-		auto getComSystemIncludePaths(std::set<Project*> const& _dependencies) const -> std::vector<std::string>;
-		auto getComDefines(std::set<Project*> const& _dependencies) const -> std::vector<std::string>;
 	};
 }

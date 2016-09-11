@@ -1,88 +1,59 @@
 #pragma once
 
 #include "Package.h"
-#include <serializer/serializer.h>
+#include "Visitor.h"
+#include "WorkspaceConfig.h"
+#include <list>
 
-namespace aBuild {
+namespace busy {
 
-
-class Workspace {
+class Workspace final {
 public:
-	struct FileState {
-		int64_t lastChange {0};
-		std::vector<std::string> dependencies;
-		std::vector<std::string> optDependencies;
-		bool    hasChanged {false};
-
-
-		template <typename Node>
-		void serialize(Node& node) {
-			node["lastChange"]      % lastChange;
-			node["dependencies"]    % dependencies;
-			node["optDependencies"] % optDependencies;
-		}
-	};
-	class ConfigFile {
-	private:
-		std::string buildMode { "debug" };
-		std::string toolchain { "" };
-		uint64_t    lastCompileTime {0};
-		std::string mLastFlavor;
-
-		std::map<std::string, std::map<std::string, FileState>> mAutoFileStates;
-
-	public:
-		auto getBuildMode() const -> std::string const&  { return buildMode; }
-		void setBuildMode(std::string _buildMode)        { buildMode = std::move(_buildMode); }
-		auto getToolchain() const -> std::string const&  { return toolchain; }
-		void setToolchain(std::string _toolchain)        { toolchain = std::move(_toolchain); }
-		auto getLastCompileTime() const -> int64_t       { return lastCompileTime; }
-		void setLastCompileTime(int64_t _time)           { lastCompileTime = _time; }
-		auto getLastFlavor() const -> std::string        { return mLastFlavor; }
-		void setLastFlavor(std::string _flavor)          { mLastFlavor = std::move(_flavor); }
-
-		auto accessAutoFileStates() -> std::map<std::string, FileState>& {
-			std::string key = buildMode + "/" + toolchain;
-			return mAutoFileStates[key];
-		}
-
-
-		template<typename Node>
-		void serialize(Node& node) {
-			node["buildMode"]       % buildMode or std::string("debug");
-			node["toolchain"]       % toolchain;
-			node["lastCompileTime"] % lastCompileTime or 0;
-			node["autoFileStates"]  % mAutoFileStates;
-			node["lastFlavor"]      % mLastFlavor;
-		}
-	};
-private:
-	std::string path;
-	ConfigFile  configFile;
-public:
-
-	Workspace(std::string const& _path);
+	Workspace(bool _noSaving = false);
 	~Workspace();
 
-	void save();
+	auto getPackageFolders() const -> std::vector<std::string> const&;
+	auto getPackages() const -> std::list<Package> const&;
 
-	ConfigFile& accessConfigFile() { return configFile; }
+	bool hasPackage(std::string const& _name) const;
+	auto getPackage(std::string const& _name) const -> Package const&;
+	auto getPackage(std::string const& _name) -> Package&;
 
-	auto getAllMissingPackages()     const -> std::vector<PackageURL>;
-	auto getAllValidPackages(bool _includingRoot = false) const -> std::vector<Package>;
-	auto getAllInvalidPackages()     const -> std::vector<std::string>;
-	auto getAllRequiredPackages()    const -> std::vector<PackageURL>;
-	auto getAllNotRequiredPackages() const -> std::vector<std::string>;
+	bool hasProject(std::string const& _name) const;
+	auto getProject(std::string const& _name) const -> Project const&;
 
-	auto getAllRequiredProjects()    const -> std::map<std::string, Project>;
+	auto getProjectAndDependencies(std::string const& _name = "") const -> std::vector<Project const*>;
 
-	auto getExcludedProjects() const -> std::set<std::string>;
+	auto getFlavors() const -> std::map<std::string, Flavor const*>;
+	auto getToolchains() const -> std::map<std::string, Toolchain const*>;
+	auto getBuildModes() const -> std::vector<std::string>;
 
-	auto getRootPackageName() const -> std::string;
+	auto getSelectedToolchain() const -> std::string;
+	auto getSelectedBuildMode() const -> std::string;
+
+	void setSelectedToolchain(std::string const& _toolchainName);
+	void setSelectedBuildMode(std::string const& _buildMode);
+
+	void setFlavor(std::string const& _flavor);
+
+	auto getFileStat(std::string const& _file) -> FileStat&;
+
+	auto getExcludedProjects(std::string const& _toolchain) const -> std::set<Project const*>;
+private:
+	void loadPackageFolders();
+	void loadPackages();
+
+	void discoverSystemToolchains();
 
 private:
-	void createABuildFolder();
-	void createPackageFolder();
+	std::vector<std::string> mPackageFolders;
+	std::list<Package>       mPackages;
+
+	std::map<std::string, Toolchain> mSystemToolchains;
+
+	WorkspaceConfig mConfig;
+
+	bool mNoSaving { false };
 };
 
 }
