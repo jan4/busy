@@ -241,7 +241,6 @@ bool build(std::string const& rootProjectName, bool verbose, bool noconsole, int
 		std::vector<std::string> options = toolchain->cppCompiler.command;
 		options.push_back("-std=c++11");
 		//!TODO shouldnt be default argument
-		options.push_back("-fdiagnostics-color=always");
 		options.push_back("-Wall");
 		options.push_back("-Wextra");
 		options.push_back("-fmessage-length=0");
@@ -259,6 +258,7 @@ bool build(std::string const& rootProjectName, bool verbose, bool noconsole, int
 			options.push_back("-O3");
 			options.push_back("-g3");
 		} else if (buildModeName == "debug") {
+			options.push_back("-fdiagnostics-color=always");
 			options.push_back("-O0");
 			options.push_back("-g3");
 		}
@@ -355,7 +355,6 @@ bool build(std::string const& rootProjectName, bool verbose, bool noconsole, int
 		std::vector<std::string> options = toolchain->cCompiler.command;
 		options.push_back("-std=c11");
 		//!TODO shouldnt be default argument
-		options.push_back("-fdiagnostics-color=always");
 		options.push_back("-Wall");
 		options.push_back("-Wextra");
 		options.push_back("-fmessage-length=0");
@@ -375,6 +374,7 @@ bool build(std::string const& rootProjectName, bool verbose, bool noconsole, int
 		} else if (buildModeName == "debug") {
 			options.push_back("-g3");
 			options.push_back("-O0");
+			options.push_back("-fdiagnostics-color=always");
 		}
 		//!ENDTODO
 		options.push_back("-DBUSY=BUSY");
